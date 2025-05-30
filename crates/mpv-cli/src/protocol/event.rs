@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, enum_kinds::EnumKind)]
+#[enum_kind(MpvEventKind, derive(strum::Display, PartialOrd, Ord, Hash))]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "event")]
 pub enum MpvEvent {

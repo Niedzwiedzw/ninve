@@ -3,13 +3,14 @@ use {
     crate::{
         binary::{MpvBinary, get_mpv_binary},
         ipc,
-        protocol::event::MpvEvent,
+        protocol::event::{MpvEvent, MpvEventKind},
     },
     postage::{
         sink::Sink,
         stream::{Stream, TryRecvError},
     },
     std::{
+        collections::BTreeMap,
         convert::identity,
         io::BufReader,
         os::unix::net::UnixStream,
@@ -53,7 +54,7 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct MpvInstance {
     pub process: MpvProcess,
-    pub events: Vec<MpvEvent>,
+    pub events: BTreeMap<MpvEventKind, MpvEvent>,
     pub(crate) line_buffer: String,
 }
 

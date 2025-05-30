@@ -3,12 +3,11 @@ use {
         instance::MpvInstance,
         protocol::{
             MpvCommand,
-            event::MpvEvent,
+            event::{MpvEvent, MpvEventKind},
             message::{BaseResponse, ErrorResponse, IpcResponse},
         },
     },
     serde::{Deserialize, Serialize, de::DeserializeOwned},
-    serde_json::{Map, Value},
     std::{
         any::type_name,
         convert::identity,
@@ -16,8 +15,8 @@ use {
         io::{BufRead, Write},
         process::ExitStatus,
     },
-    tap::{Pipe, Tap},
-    tracing::{debug, error, info, instrument, warn},
+    tap::Pipe,
+    tracing::{debug, error, info, instrument},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -59,6 +58,7 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 pub struct WithBaseResponse<T> {
     #[serde(flatten)]
@@ -172,7 +172,8 @@ impl MpvInstance {
                             HandledIpcResponse::Success(success_response) => return Ok(success_response),
                             HandledIpcResponse::Event(mpv_event) => {
                                 info!("[event] {mpv_event:?}");
-                                self.events.push(mpv_event);
+                                self.events
+                                    .insert(MpvEventKind::from(&mpv_event), mpv_event);
                                 continue;
                             }
                         },

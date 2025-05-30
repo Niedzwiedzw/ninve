@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use {
-    serde::Serialize,
     serde_json::{Value, json},
     std::collections::HashMap,
 };
