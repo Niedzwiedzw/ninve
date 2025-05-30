@@ -1,25 +1,18 @@
 use serde::Deserialize;
 
+pub mod grouped_events;
+
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, enum_kinds::EnumKind)]
 #[enum_kind(MpvEventKind, derive(strum::Display, PartialOrd, Ord, Hash))]
-#[serde(rename_all = "kebab-case")]
-#[serde(tag = "event")]
+#[serde(untagged)]
 pub enum MpvEvent {
-    StartFile(StartFileEvent),
-    EndFile(EndFileEvent),
-    FileLoaded,
-    Seek,
-    PlaybackRestart,
-    Shutdown,
-    LogMessage(LogMessageEvent),
-    Hook(HookEvent),
-    GetPropertyReply(GetPropertyReplyEvent),
-    SetPropertyReply(SetPropertyReplyEvent),
-    CommandReply(CommandReplyEvent),
-    ClientMessage(ClientMessageEvent),
-    VideoReconfig,
-    AudioReconfig,
-    PropertyChange(PropertyChangeEvent),
+    File(grouped_events::FileEvent),
+    PlaybackControl(grouped_events::PlaybackControlEvent),
+    System(grouped_events::SystemEvent),
+    Reply(grouped_events::ReplyEvent),
+    Config(grouped_events::ConfigEvent),
+    Message(grouped_events::MessageEvent),
+    ClientInteraction(grouped_events::ClientInteractionEvent),
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]

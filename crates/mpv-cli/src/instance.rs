@@ -3,7 +3,11 @@ use {
     crate::{
         binary::{MpvBinary, get_mpv_binary},
         ipc,
-        protocol::event::{MpvEvent, MpvEventKind},
+        protocol::event::{
+            MpvEvent,
+            MpvEventKind,
+            grouped_events::{FileEvent, PlaybackControlEvent},
+        },
     },
     postage::{
         sink::Sink,
@@ -15,7 +19,7 @@ use {
         io::BufReader,
         os::unix::net::UnixStream,
         path::Path,
-        process::{Command, ExitStatus},
+        process::{Command, ExitStatus, Stdio},
         thread::sleep,
         time::Duration,
     },
@@ -44,7 +48,7 @@ pub enum Error {
     #[error("Could not wait for initialisation due to closed ipc stream")]
     StreamClosed,
     #[error("Error occurred while waiting for file loaded event")]
-    WaitingForFileLoadedEvent(#[source] ipc::Error),
+    WaitingForPlaybackStart(#[source] ipc::Error),
     #[error("Error occurred when killing process")]
     KillingProcess(#[source] std::io::Error),
 }
@@ -171,9 +175,9 @@ impl MpvProcess {
                             binary
                                 .arg(format!("--input-ipc-server={}", ipc_socket_path.path().display()))
                                 .arg(media_path)
-                                .stdin(std::process::Stdio::inherit())
-                                .stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::inherit());
+                                .stdin(Stdio::inherit())
+                                .stdout(Stdio::null())
+                                .stderr(Stdio::inherit());
                         })
                         .tap(|command| {
                             debug!("running command {command:?}");
@@ -220,15 +224,15 @@ impl MpvInstance {
                 self.events()
                     .find_map(|ev| {
                         ev.map(|ev| (ev == event).then_some(()))
-                            .map_err(Error::WaitingForFileLoadedEvent)
+                            .map_err(Error::WaitingForPlaybackStart)
                             .transpose()
                     })
                     .ok_or(Error::StreamClosed)
                     .and_then(identity)
             };
             Ok(())
-                .and_then(|_| await_event(MpvEvent::FileLoaded))
-                .and_then(|_| await_event(MpvEvent::PlaybackRestart))
+                .and_then(|_| await_event(MpvEvent::File(FileEvent::FileLoaded)))
+                .and_then(|_| await_event(MpvEvent::PlaybackControl(PlaybackControlEvent::PlaybackRestart)))
         };
         found.map(move |_| self)
     }
