@@ -8,7 +8,6 @@
   };
 
   outputs = {
-    self,
     nixpkgs,
     rust-overlay,
     flake-utils,
@@ -20,20 +19,31 @@
         pkgs = import nixpkgs {
           inherit system overlays;
         };
+        rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        buildInputs = with pkgs; [
+          openssl
+          pkg-config
+          rustToolchain
+          # iced specific
+          expat
+          fontconfig
+          freetype
+          freetype.dev
+          libGL
+          pkg-config
+          xorg.libX11
+          xorg.libXcursor
+          xorg.libXi
+          xorg.libXrandr
+          wayland
+          libxkbcommon
+        ];
       in {
         devShells.default = with pkgs;
           mkShell {
-            buildInputs = [
-              openssl
-              pkg-config
-              rust-bin.fromRustupToolchainFile
-              ./rust-toolchain.toml
-            ];
-
-            shellHook = ''
-              alias ls=eza
-              alias find=fd
-            '';
+            inherit buildInputs;
+            LD_LIBRARY_PATH =
+              builtins.foldl' (a: b: "${a}:${b}/lib") "${pkgs.vulkan-loader}/lib" buildInputs;
           };
       }
     );

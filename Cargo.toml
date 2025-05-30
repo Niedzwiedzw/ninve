@@ -1,6 +1,21 @@
-[package]
-name = "ninve"
+[workspace]
+resolver = "2"
+members = ["crates/ninve-cli", "crates/mpv-cli"]
+
+[workspace.package]
 version = "0.1.0"
+license = "MIT"
+repository = "https://github.com/Niedzwiedzw/ninve"
+categories = ["gui", "video", "editor"]
+readme = "README.md"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
+anyhow = "1.0.98"
+clap = "4.5.38"
+futures = "0.3.31"
+futures-util = "0.3.31"
+tap = "1.0.1"
+tokio = "1.45.1"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
