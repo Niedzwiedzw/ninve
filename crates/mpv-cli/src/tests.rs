@@ -44,7 +44,7 @@ fn test_play_whole_video() -> Result<()> {
                 .and_then(|response| {
                     info!("response: {response:?}");
                     sleep_1s();
-                    mpv.finish().context("finishing the process")
+                    mpv.kill().context("finishing the process").map(|_| ())
                 })
         })
         .context("testing basic functionality")

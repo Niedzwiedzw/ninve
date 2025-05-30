@@ -10,11 +10,10 @@ use {
 mod type_guard;
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct SuccessResponse<T> {
+pub struct BaseResponse {
     #[allow(dead_code)]
     error: type_guard::SuccessGuard,
-    pub request_id: i64,
-    pub data: T,
+    pub request_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Clone, thiserror::Error)]
@@ -25,7 +24,7 @@ pub struct ErrorResponse {
 
 #[derive(Debug, Clone)]
 pub enum IpcResponse<T> {
-    Success(SuccessResponse<T>),
+    Success(T),
     Error(ErrorResponse),
     Event(MpvEvent),
 }
@@ -34,7 +33,7 @@ impl<T: DeserializeOwned> IpcResponse<T> {
     pub fn from_json(json: &str) -> std::result::Result<Self, serde_json::Error> {
         from_str::<Value>(json).and_then(|value| match &value {
             Value::Object(map) => match map.get("error") {
-                Some(Value::String(s)) if s.as_str() == "success" => from_value::<SuccessResponse<_>>(value).map(Self::Success),
+                Some(Value::String(s)) if s.as_str() == "success" => from_value::<_>(value).map(Self::Success),
                 _ => Err(())
                     .or_else(|_| from_value::<MpvEvent>(value.clone()).map(Self::Event))
                     .or_else(|reason| {
@@ -50,7 +49,10 @@ impl<T: DeserializeOwned> IpcResponse<T> {
 
 pub mod api {
     use {
-        super::low_level::{SetProperty, property::PropertyValue},
+        super::{
+            BaseResponse,
+            low_level::{SetProperty, property::PropertyValue},
+        },
         crate::protocol::MpvCommand,
         serde::Serialize,
         std::fmt::Debug,
@@ -83,7 +85,7 @@ pub mod api {
     where
         T: PropertyValue + Debug,
     {
-        type Response = common_responses::Empty;
+        type Response = BaseResponse;
     }
 }
 

@@ -19,7 +19,7 @@ use {
         time::Duration,
     },
     tap::{Pipe, Tap},
-    tracing::{debug, info, instrument, trace, warn},
+    tracing::{debug, info, instrument, trace},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -44,6 +44,8 @@ pub enum Error {
     StreamClosed,
     #[error("Error occurred while waiting for file loaded event")]
     WaitingForFileLoadedEvent(#[source] ipc::Error),
+    #[error("Error occurred when killing process")]
+    KillingProcess(#[source] std::io::Error),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -66,7 +68,7 @@ struct WatchedCommand {
 impl Drop for WatchedCommand {
     fn drop(&mut self) {
         let status = self.kill().expect("dropping failed");
-        warn!("process exited with {status:?}")
+        debug!("[DROP] process exited with {status:?}")
     }
 }
 
@@ -77,12 +79,14 @@ impl WatchedCommand {
             .expect("could not communicate with the process")
     }
     pub fn kill(&mut self) -> std::io::Result<ExitStatus> {
-        self.kill
-            .blocking_send(())
-            .expect("could not communicate kill with to process");
-        self.finish
-            .blocking_recv()
-            .expect("could not communicate post kill")
+        if let Err(reason) = self.kill.blocking_send(()) {
+            tracing::debug!("could not communicate kill with to process: {reason:?}");
+            Ok(ExitStatus::default())
+        } else {
+            self.finish
+                .blocking_recv()
+                .expect("could not communicate post kill")
+        }
     }
     pub fn spawn(mut command: Command) -> std::io::Result<Self> {
         let (mut finish_tx, finish_rx) = postage::oneshot::channel();
@@ -151,6 +155,9 @@ pub struct MpvProcess {
 }
 
 impl MpvProcess {
+    pub fn kill(mut self) -> Result<ExitStatus> {
+        self.child.kill().map_err(Error::KillingProcess)
+    }
     #[instrument(ret, level = "TRACE")]
     fn spawn(media_path: &Path) -> Result<Self> {
         let ipc_socket_path = tempfile::NamedTempFile::new().map_err(Error::CreatingTempDir)?;

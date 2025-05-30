@@ -4,16 +4,17 @@ use {
         protocol::{
             MpvCommand,
             event::MpvEvent,
-            message::{ErrorResponse, IpcResponse, SuccessResponse},
+            message::{BaseResponse, ErrorResponse, IpcResponse},
         },
     },
-    serde::{Serialize, de::DeserializeOwned},
+    serde::{Deserialize, Serialize, de::DeserializeOwned},
     serde_json::{Map, Value},
     std::{
         any::type_name,
         convert::identity,
         fmt::Debug,
         io::{BufRead, Write},
+        process::ExitStatus,
     },
     tap::{Pipe, Tap},
     tracing::{debug, error, info, instrument, warn},
@@ -52,12 +53,22 @@ pub enum Error {
     UnexpectedResponse,
     #[error("While handling response")]
     HandleResponse(#[source] ErrorResponse),
+    #[error("While killing MPV")]
+    KillingMpv(#[source] Box<crate::instance::Error>),
 }
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Deserialize, Debug)]
+pub struct WithBaseResponse<T> {
+    #[serde(flatten)]
+    pub base: BaseResponse,
+    #[serde(flatten)]
+    pub value: T,
+}
+
 pub enum HandledIpcResponse<T> {
-    Success(SuccessResponse<T>),
+    Success(T),
     Event(MpvEvent),
 }
 
@@ -72,6 +83,12 @@ impl<T> IpcResponse<T> {
 }
 
 impl MpvInstance {
+    pub fn kill(self) -> Result<ExitStatus> {
+        self.process
+            .kill()
+            .map_err(Box::new)
+            .map_err(Error::KillingMpv)
+    }
     #[instrument(skip(self), level = "DEBUG", ret, err)]
     pub fn command<C>(&mut self, command: C) -> Result<C::Response>
     where
@@ -152,7 +169,7 @@ impl MpvInstance {
                         .and_then(|message| message.handle().map_err(Error::HandleResponse))
                     {
                         Ok(response) => match response {
-                            HandledIpcResponse::Success(success_response) => return Ok(success_response.data),
+                            HandledIpcResponse::Success(success_response) => return Ok(success_response),
                             HandledIpcResponse::Event(mpv_event) => {
                                 info!("[event] {mpv_event:?}");
                                 self.events.push(mpv_event);
