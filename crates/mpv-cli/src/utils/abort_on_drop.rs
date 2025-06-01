@@ -1,6 +1,7 @@
 use tracing::{instrument, trace};
 
 /// this task is no longer being polled when the handle goes out of scope
+#[derive(Debug)]
 pub struct AbortOnDrop<T>(pub tokio::task::JoinHandle<T>);
 
 impl<T> Drop for AbortOnDrop<T> {

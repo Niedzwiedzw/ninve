@@ -15,7 +15,6 @@ extension-traits.workspace = true
 futures.workspace = true
 futures-util.workspace = true
 itertools.workspace = true
-postage.workspace = true
 rand.workspace = true
 ringbuf = "0.4.8"
 serde = { workspace = true, features = ["derive"] }
@@ -24,7 +23,8 @@ strum = { workspace = true, features = ["derive"] }
 tap.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { version = "0.1.17", features = ["tokio-util"] }
 tracing.workspace = true
 which.workspace = true
 

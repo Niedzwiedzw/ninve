@@ -76,11 +76,12 @@ struct Ninve {
 }
 
 impl Ninve {
-    pub fn new(media_path: &Path) -> Result<Self> {
+    pub async fn new(media_path: &Path) -> Result<Self> {
         MpvInstance::new(media_path)
-            .context("spawning mpv instance")
-            .and_then(|mpv| mpv.await_playback().context("awaiting playback"))
-            .map(|mpv| Self { mpv })
+            .map(|r| r.context("spawning mpv instance"))
+            .and_then(|mpv| mpv.await_playback().map(|r| r.context("awaiting playback")))
+            .map_ok(|mpv| Self { mpv })
+            .await
     }
 }
 
@@ -102,6 +103,7 @@ fn main() -> Result<()> {
         .pipe(|_terminal| {
             in_runtime(async move || {
                 Ninve::new(&media_path)
+                    .await
                     .context("instantiating ninve")
                     .pipe(ready)
                     .and_then(|ninve| {

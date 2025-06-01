@@ -7,9 +7,11 @@ use {
         },
     },
     anyhow::{Context, Result},
-    std::{path::Path, thread::sleep, time::Duration},
-    tap::TapFallible,
-    tracing::info,
+    futures::{FutureExt, TryFutureExt},
+    std::path::Path,
+    test_log::test,
+    tokio::time::{Duration, sleep},
+    tracing::{info, info_span},
 };
 
 macro_rules! in_test_dir {
@@ -18,34 +20,39 @@ macro_rules! in_test_dir {
     };
 }
 
-fn sleep_1s() {
-    sleep(Duration::from_secs(1))
+async fn sleep_1s() {
+    sleep(Duration::from_secs(1)).await
 }
 
-#[test_log::test]
-fn test_play_whole_video() -> Result<()> {
-    info!("test_play_whole_video");
+#[test(tokio::test)]
+async fn test_play_whole_video() -> Result<()> {
+    let _s = info_span!("test_play_whole_video").entered();
     MpvInstance::new(in_test_dir!("test-video-1.mp4"))
-        .context("starting mpv")
-        .and_then(|mpv| mpv.await_playback().context("awaiting for playback"))
-        .tap_ok(|_| info!("playback started"))
-        .and_then(|mut mpv| {
-            Ok(())
-                .and_then(|_| {
-                    mpv.command(SetPropertyCommand::new(SetProperty(Pause(true))))
-                        .context("pausing")
-                })
-                .and_then(|response| {
-                    info!("response: {response:?}");
-                    sleep_1s();
-                    mpv.command(SetPropertyCommand::new(SetProperty(Pause(false))))
-                        .context("unpausing")
-                })
-                .and_then(|response| {
-                    info!("response: {response:?}");
-                    sleep_1s();
-                    mpv.kill().context("finishing the process").map(|_| ())
-                })
+        .map(|r| r.context("starting mpv"))
+        .and_then(|mpv| {
+            mpv.await_playback()
+                .map(|r| r.context("awaiting for playback"))
         })
+        .inspect_ok(|_| info!("playback started"))
+        .and_then(async |mut mpv| {
+            let response = mpv
+                .command(SetPropertyCommand::new(SetProperty(Pause(true))))
+                .await
+                .context("pausing")?;
+            info!("response: {response:?}");
+            sleep_1s().await;
+            let response = mpv
+                .command(SetPropertyCommand::new(SetProperty(Pause(false))))
+                .await
+                .context("unpausing")?;
+            info!("response: {response:?}");
+            sleep_1s().await;
+            mpv.kill()
+                .await
+                .context("finishing the process")
+                .map(|_| ())?;
+            Ok(())
+        })
+        .await
         .context("testing basic functionality")
 }

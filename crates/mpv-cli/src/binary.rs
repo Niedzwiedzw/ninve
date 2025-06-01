@@ -1,6 +1,6 @@
 use {
     std::{path::Path, sync::OnceLock},
-    tap::Pipe,
+    tap::{Pipe, Tap},
     tracing::instrument,
 };
 
@@ -14,8 +14,11 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct MpvBinary<'a>(&'a Path);
 
 impl<'a> MpvBinary<'a> {
-    pub fn command(self) -> std::process::Command {
-        std::process::Command::new(self.0)
+    pub fn command(self) -> tokio::process::Command {
+        tokio::process::Command::new(self.0).tap_mut(|c| {
+            c.arg("--msg-level=ipc=debug");
+            c.kill_on_drop(true);
+        })
     }
 }
 

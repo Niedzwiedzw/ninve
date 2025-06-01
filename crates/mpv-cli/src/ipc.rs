@@ -2,16 +2,25 @@ use {
     crate::{
         instance::MpvInstance,
         protocol::{
-            event::{MpvEvent, MpvEventKind}, message::{BaseResponse, ErrorResponse, IpcResponse}, MpvCommand
+            MpvCommand,
+            event::MpvEvent,
+            message::{BaseResponse, ErrorResponse, IpcResponse},
         },
-    }, ringbuf::traits::Producer, serde::{de::DeserializeOwned, Deserialize, Serialize}, std::{
-        any::type_name,
-        convert::identity,
-        fmt::Debug,
-        io::{BufRead, Write},
-        process::ExitStatus,
-    }, tap::Pipe, tracing::{debug, error, info, instrument}
+    },
+    futures::TryFutureExt,
+    serde::{Deserialize, Serialize, de::DeserializeOwned},
+    serde_json::Value,
+    std::{any::type_name, fmt::Debug, future::ready, process::ExitStatus},
+    tap::Pipe,
+    tokio::task::block_in_place,
+    tracing::{debug, error, instrument},
 };
+
+#[derive(Debug, derive_more::From, derive_more::Display)]
+pub enum MaybeDeserializedResponse {
+    Raw(String),
+    Value(Value),
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -24,7 +33,7 @@ pub enum Error {
     #[error("Could not deserialize a command response:\n`{raw}`")]
     DeserializingResponse {
         ty: &'static str,
-        raw: String,
+        raw: MaybeDeserializedResponse,
         #[source]
         source: serde_json::Error,
     },
@@ -48,6 +57,10 @@ pub enum Error {
     HandleResponse(#[source] ErrorResponse),
     #[error("While killing MPV")]
     KillingMpv(#[source] Box<crate::instance::Error>),
+    #[error("Sending command to process (channel closed)")]
+    SendingCommand,
+    #[error("Reading response from command bus (channel closed)")]
+    ReceivingResponseChannelClosed,
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -77,17 +90,18 @@ impl<T> IpcResponse<T> {
     }
 }
 
-mod event_bus;
+pub mod event_bus;
 
 impl MpvInstance {
-    pub fn kill(self) -> Result<ExitStatus> {
+    pub async fn kill(self) -> Result<ExitStatus> {
         self.process
             .kill()
+            .await
             .map_err(Box::new)
             .map_err(Error::KillingMpv)
     }
     #[instrument(skip(self), level = "DEBUG", ret, err)]
-    pub fn command<C>(&mut self, command: C) -> Result<C::Response>
+    pub async fn command<C>(&mut self, command: C) -> Result<C::Response>
     where
         C: MpvCommand + Debug,
     {
@@ -99,84 +113,42 @@ impl MpvInstance {
                 command: command_debug,
                 source: Box::new(source),
             })
+            .await
     }
-    fn with_next_line<T, F>(&mut self, with_next_line: F) -> std::io::Result<T>
-    where
-        F: FnOnce(&str) -> T,
-    {
-        self.line_buffer.clear();
+
+    async fn next_response_raw<R: DeserializeOwned + Debug>(&mut self) -> Result<R> {
         self.process
-            .ipc_stream
-            .read_line(&mut self.line_buffer)
-            .map(|_| with_next_line(&self.line_buffer))
-    }
-    fn next_message_raw<R: DeserializeOwned + Debug>(&mut self) -> Result<IpcResponse<R>> {
-        self.with_next_line(|line| {
-            IpcResponse::<R>::from_json(line).map_err(|source| Error::DeserializingResponse {
-                ty: type_name::<R>(),
-                raw: line.to_string(),
-                source,
-            })
-        })
-        .map_err(Error::ReadingFromStdout)
-        .and_then(identity)
-    }
-
-    pub fn next_event(&mut self) -> Result<MpvEvent> {
-        self.next_message_raw::<()>().and_then(|message| {
-            message
-                .handle()
-                .map_err(Error::HandleResponse)
-                .and_then(|response| match response {
-                    HandledIpcResponse::Success(success_response) => {
-                        error!("unexpected response: {success_response:?}");
-                        Err(Error::UnexpectedResponse)
-                    }
-                    HandledIpcResponse::Event(mpv_event) => Ok(mpv_event),
+            .event_bus
+            .responses
+            .recv()
+            .await
+            .ok_or(Error::ReceivingResponseChannelClosed)
+            .and_then(|response| {
+                block_in_place(|| {
+                    serde_json::from_value::<R>(response.clone()).map_err(|source| Error::DeserializingResponse {
+                        ty: type_name::<R>(),
+                        raw: response.clone().into(),
+                        source,
+                    })
                 })
-        })
+            })
     }
-
-    pub fn events(&mut self) -> impl Iterator<Item = Result<MpvEvent>> + '_ {
-        std::iter::from_fn(|| Some(self.next_event()))
-    }
-
     #[deprecated = "prefer .command()"]
     #[instrument(level = "TRACE", ret, err)]
-    pub fn command_raw<C: Serialize + Debug, R: DeserializeOwned + Debug>(&mut self, command: C) -> Result<R> {
+    pub async fn command_raw<C: Serialize + Debug, R: DeserializeOwned + Debug>(&mut self, command: C) -> Result<R> {
         debug!("running command {command:?}");
-        serde_json::to_string(&command)
+        block_in_place(|| serde_json::to_string(&command))
             .map_err(|source| Error::SerializingCommand { ty: type_name::<C>(), source })
             .and_then(|command| {
                 debug!(" -> [ command ] {command}");
                 self.process
-                    .ipc_stream
-                    .get_mut()
-                    .pipe(|out| {
-                        Ok(())
-                            .and_then(|_| out.write_all(command.as_bytes()))
-                            .and_then(|_| out.write("\n".as_bytes()))
-                    })
-                    .map_err(Error::WritingToStdin)
+                    .event_bus
+                    .commands
+                    .send(command)
+                    .map_err(|_| Error::SendingCommand)
             })
-            .and_then(|_| {
-                loop {
-                    match self
-                        .next_message_raw::<R>()
-                        .and_then(|message| message.handle().map_err(Error::HandleResponse))
-                    {
-                        Ok(response) => match response {
-                            HandledIpcResponse::Success(success_response) => return Ok(success_response),
-                            HandledIpcResponse::Event(mpv_event) => {
-                                info!("[event] {mpv_event:?}");
-                                self.buffer.try_push(elem)
-                                    .(MpvEventKind::from(&mpv_event), mpv_event);
-                                continue;
-                            }
-                        },
-                        Err(error) => return Err(error),
-                    }
-                }
-            })
+            .pipe(ready)
+            .and_then(|_| self.next_response_raw())
+            .await
     }
 }

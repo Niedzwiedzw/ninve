@@ -2,30 +2,26 @@ use {
     super::binary,
     crate::{
         binary::{MpvBinary, get_mpv_binary},
-        ipc::{self, HandledIpcResponse},
+        ipc::{self, event_bus::EventBus},
         protocol::event::{
             MpvEvent,
-            MpvEventKind,
             grouped_events::{FileEvent, PlaybackControlEvent},
         },
     },
-    postage::{
-        sink::Sink,
-        stream::{Stream, TryRecvError},
-    },
-    ringbuf::{HeapRb, LocalRb},
+    futures::{FutureExt, Stream, TryFutureExt},
+    futures_util::StreamExt,
     std::{
-        collections::BTreeMap,
-        convert::identity,
-        io::BufReader,
-        os::unix::net::UnixStream,
+        future::ready,
         path::Path,
-        process::{Command, ExitStatus, Stdio},
-        thread::sleep,
-        time::Duration,
+        process::{ExitStatus, Stdio},
     },
     tap::{Pipe, Tap},
-    tracing::{debug, info, instrument, trace},
+    tokio::{
+        net::UnixStream,
+        sync::oneshot,
+        time::{Duration, sleep},
+    },
+    tracing::{Instrument, Span, debug, debug_span, info, instrument, trace, warn},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -47,7 +43,7 @@ pub enum Error {
     #[error("Could not create a tempdir for socket")]
     CreatingTempDir(#[source] std::io::Error),
     #[error("Could not wait for initialisation due to closed ipc stream")]
-    StreamClosed,
+    StreamClosedDuringPlaybackWait,
     #[error("Error occurred while waiting for file loaded event")]
     WaitingForPlaybackStart(#[source] ipc::Error),
     #[error("Error occurred when killing process")]
@@ -60,61 +56,83 @@ type Result<T> = std::result::Result<T, Error>;
 #[derivative(Debug)]
 pub struct MpvInstance {
     pub process: MpvProcess,
-    #[derivative(Debug = "ignore")]
-    buffer: HeapRb<HandledIpcResponse<serde_json::Value>>,
-    pub(crate) line_buffer: String,
 }
 
 #[derive(Debug)]
 struct WatchedCommand {
-    finish: postage::oneshot::Receiver<std::io::Result<ExitStatus>>,
-    kill: postage::oneshot::Sender<()>,
+    finish: Option<oneshot::Receiver<std::io::Result<ExitStatus>>>,
+    kill: Option<oneshot::Sender<()>>,
     #[allow(dead_code)]
-    join: std::thread::JoinHandle<()>,
+    join: tokio::task::JoinHandle<()>,
 }
 
 impl Drop for WatchedCommand {
     fn drop(&mut self) {
-        let status = self.kill().expect("dropping failed");
+        let status = self.blocking_kill().expect("dropping failed");
         debug!("[DROP] process exited with {status:?}")
     }
 }
 
 impl WatchedCommand {
-    pub fn wait(mut self) -> std::io::Result<ExitStatus> {
+    pub async fn wait(mut self) -> std::io::Result<ExitStatus> {
         self.finish
-            .blocking_recv()
+            .take()
+            .expect("already awaited")
+            .await
             .expect("could not communicate with the process")
     }
-    pub fn kill(&mut self) -> std::io::Result<ExitStatus> {
-        if let Err(reason) = self.kill.blocking_send(()) {
-            tracing::debug!("could not communicate kill with to process: {reason:?}");
-            Ok(ExitStatus::default())
-        } else {
-            self.finish
-                .blocking_recv()
-                .expect("could not communicate post kill")
+    /// TODO
+    pub(crate) fn blocking_kill(&mut self) -> std::io::Result<ExitStatus> {
+        Ok(ExitStatus::default())
+        // if let Err(reason) = self.kill.send(()) {
+        //     tracing::debug!("could not communicate kill with to process: {reason:?}");
+        //     Ok(ExitStatus::default())
+        // } else {
+        //     self.finish
+        //         .take()
+        //         .expect("already")
+        //         .expect("could not communicate post kill")
+        // }
+    }
+
+    pub(crate) async fn kill(&mut self) -> std::io::Result<ExitStatus> {
+        match self.kill.take() {
+            Some(kill) => {
+                if let Err(reason) = kill.send(()) {
+                    tracing::debug!("could not communicate kill with to process: {reason:?}");
+                    Ok(ExitStatus::default())
+                } else {
+                    self.finish
+                        .take()
+                        .expect("already killed")
+                        .await
+                        .expect("could not communicate post kill")
+                }
+            }
+            None => Ok(ExitStatus::default()),
         }
     }
-    pub fn spawn(mut command: Command) -> std::io::Result<Self> {
-        let (mut finish_tx, finish_rx) = postage::oneshot::channel();
-        let (kill_tx, mut kill_rx) = postage::oneshot::channel::<()>();
-        let (mut could_not_spawn_tx, mut could_not_spawn_rx) = postage::oneshot::channel();
-        let join = std::thread::spawn(move || {
+
+    pub async fn spawn(mut command: tokio::process::Command) -> std::io::Result<Self> {
+        let (finish_tx, finish_rx) = oneshot::channel();
+        let (kill_tx, mut kill_rx) = oneshot::channel::<()>();
+        let (could_not_spawn_tx, could_not_spawn_rx) = oneshot::channel();
+        let join = tokio::task::spawn(async move {
             (match command.spawn() {
                 Ok(child) => {
-                    could_not_spawn_tx.blocking_send(Ok(())).unwrap();
+                    could_not_spawn_tx.send(Ok(())).unwrap();
                     Ok(child)
                 }
                 Err(error) => {
-                    could_not_spawn_tx.blocking_send(Err(error)).unwrap();
-                    sleep(Duration::from_millis(50));
+                    could_not_spawn_tx.send(Err(error)).unwrap();
+                    sleep(Duration::from_millis(50)).await;
                     panic!("could not spawn process")
                 }
             })
-            .and_then(|mut child| {
+            .pipe(ready)
+            .and_then(async |mut child| {
                 loop {
-                    sleep(Duration::from_millis(1000 / 60));
+                    sleep(Duration::from_millis(1000 / 60)).await;
                     match child.try_wait() {
                         Ok(maybe_exit) => match maybe_exit {
                             Some(exit) => {
@@ -122,10 +140,10 @@ impl WatchedCommand {
                                 return Ok(child);
                             }
                             None => match kill_rx.try_recv() {
-                                Ok(()) => child.kill().expect("explicit kill: killing child"),
+                                Ok(()) => child.kill().await.expect("explicit kill: killing child"),
                                 Err(e) => match e {
-                                    TryRecvError::Pending => continue,
-                                    TryRecvError::Closed => child.kill().expect("closed: killing child"),
+                                    oneshot::error::TryRecvError::Empty => continue,
+                                    oneshot::error::TryRecvError::Closed => child.kill().await.expect("closed: killing child"),
                                 },
                             },
                         },
@@ -133,19 +151,20 @@ impl WatchedCommand {
                     }
                 }
             })
-            .and_then(|mut child| child.wait())
-            .pipe(|out| {
+            .and_then(async |mut child| child.wait().await)
+            .then(async |out| {
                 finish_tx
-                    .blocking_send(out)
+                    .send(out.tap(|finished| warn!("finished:{finished:?}")))
                     .expect("failed to communicate exit")
             })
+            .await
         });
         could_not_spawn_rx
-            .blocking_recv()
+            .await
             .expect("could not communicate with thread")
             .map(|_| Self {
-                finish: finish_rx,
-                kill: kill_tx,
+                finish: Some(finish_rx),
+                kill: Some(kill_tx),
                 join,
             })
     }
@@ -159,91 +178,105 @@ pub struct MpvProcess {
     child: WatchedCommand,
     #[allow(dead_code)]
     socket_file: tempfile::NamedTempFile,
-    pub ipc_stream: BufReader<UnixStream>,
+    pub event_bus: EventBus,
 }
 
 impl MpvProcess {
-    pub fn kill(mut self) -> Result<ExitStatus> {
-        self.child.kill().map_err(Error::KillingProcess)
+    pub fn events(&mut self) -> impl Stream<Item = MpvEvent> + '_ {
+        &mut self.event_bus.events
     }
-    #[instrument(ret, level = "TRACE")]
-    fn spawn(media_path: &Path) -> Result<Self> {
+    pub async fn kill(mut self) -> Result<ExitStatus> {
+        self.child.kill().await.map_err(Error::KillingProcess)
+    }
+    #[instrument(err, level = "TRACE")]
+    async fn spawn(media_path: &Path) -> Result<Self> {
         let ipc_socket_path = tempfile::NamedTempFile::new().map_err(Error::CreatingTempDir)?;
         get_mpv_binary()
             .map_err(self::Error::GettingBinary)
-            .and_then(|binary| {
-                binary.command().pipe(|command| -> Result<_> {
-                    command
-                        .tap_mut(|binary| {
-                            binary
-                                .arg(format!("--input-ipc-server={}", ipc_socket_path.path().display()))
-                                .arg(media_path)
-                                .stdin(Stdio::null())
-                                .stdout(Stdio::null())
-                                .stderr(Stdio::null());
-                        })
-                        .tap(|command| {
-                            debug!("running command {command:?}");
-                        })
-                        .pipe(WatchedCommand::spawn)
-                        .map_err(Error::SpawningCommand)
-                        .and_then(|child| {
-                            let connect = || {
-                                for _ in 0..1000 {
-                                    match UnixStream::connect(&ipc_socket_path).map_err(Error::ConnectingToSocket) {
-                                        Ok(s) => return Ok(s),
-                                        Err(reason) => {
-                                            trace!("{reason:?}");
-                                            sleep(Duration::from_millis(2));
-                                            continue;
+            .pipe(ready)
+            .and_then(async |binary| {
+                binary
+                    .command()
+                    .pipe(async |command| -> Result<_> {
+                        command
+                            .tap_mut(|binary| {
+                                binary
+                                    .arg(format!("--input-ipc-server={}", ipc_socket_path.path().display()))
+                                    .arg(media_path)
+                                    .stdin(Stdio::null())
+                                    .stdout(Stdio::inherit())
+                                    .stderr(Stdio::inherit());
+                            })
+                            .tap(|command| {
+                                debug!("running command {command:?}");
+                            })
+                            .pipe(WatchedCommand::spawn)
+                            .map_err(Error::SpawningCommand)
+                            .and_then(async |child| {
+                                let connect = async || {
+                                    for _ in 0..1000 {
+                                        match UnixStream::connect(&ipc_socket_path)
+                                            .await
+                                            .map_err(Error::ConnectingToSocket)
+                                        {
+                                            Ok(s) => return Ok(s),
+                                            Err(reason) => {
+                                                trace!("[RECONNECT] {reason:?}");
+                                                sleep(Duration::from_millis(5)).await;
+                                                continue;
+                                            }
                                         }
                                     }
-                                }
-                                UnixStream::connect(&ipc_socket_path).map_err(Error::ConnectingToSocket)
-                            };
-                            connect().map(BufReader::new).map(|ipc_stream| Self {
-                                binary,
-                                child,
-                                socket_file: ipc_socket_path,
-                                ipc_stream,
+                                    UnixStream::connect(&ipc_socket_path)
+                                        .await
+                                        .map_err(Error::ConnectingToSocket)
+                                };
+                                connect().await.map(|ipc_stream| Self {
+                                    binary,
+                                    child,
+                                    socket_file: ipc_socket_path,
+                                    event_bus: EventBus::spawn(ipc_stream),
+                                })
                             })
-                        })
-                })
+                            .await
+                    })
+                    .await
             })
+            .await
     }
 }
 
 impl MpvInstance {
-    pub fn new(media_path: &Path) -> Result<Self> {
-        MpvProcess::spawn(media_path).map(|process| Self {
-            process,
-            buffer: HeapRb::new(1024),
-            line_buffer: String::new(),
-        })
+    #[instrument]
+    pub async fn new(media_path: &Path) -> Result<Self> {
+        MpvProcess::spawn(media_path)
+            .map_ok(|process| Self { process })
+            .await
     }
-    pub fn await_playback(mut self) -> Result<Self> {
-        let found = {
-            let mut await_event = |event| {
-                self.events()
-                    .find_map(|ev| {
-                        ev.map(|ev| (ev == event).then_some(()))
-                            .map_err(Error::WaitingForPlaybackStart)
-                            .transpose()
-                    })
-                    .ok_or(Error::StreamClosed)
-                    .and_then(identity)
-            };
-            Ok(())
-                .and_then(|_| await_event(MpvEvent::File(FileEvent::FileLoaded)))
-                .and_then(|_| await_event(MpvEvent::PlaybackControl(PlaybackControlEvent::PlaybackRestart)))
+    #[instrument(skip(self))]
+    pub async fn await_playback(mut self) -> Result<Self> {
+        let mut await_event = async |event| {
+            let _s = debug_span!("awaiting event", ?event).entered();
+            trace!("waiting");
+            self.process
+                .events()
+                .filter_map(|ev| (ev == event).then_some(()).pipe(ready))
+                .next()
+                .instrument(Span::current())
+                .await
+                .ok_or(Error::StreamClosedDuringPlaybackWait)
         };
-        found.map(move |_| self)
-    }
+        await_event(MpvEvent::File(FileEvent::FileLoaded)).await?;
+        await_event(MpvEvent::PlaybackControl(PlaybackControlEvent::PlaybackRestart)).await?;
 
-    pub fn finish(self) -> Result<()> {
+        Ok(self)
+    }
+    #[instrument(skip(self))]
+    pub async fn finish(self) -> Result<()> {
         self.process
             .child
             .wait()
+            .await
             .map_err(Error::WaitingForFinish)
             .and_then(|code| if code.success() { Ok(()) } else { Err(Error::BadStatusCode { code }) })
     }
