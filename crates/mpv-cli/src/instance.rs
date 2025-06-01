@@ -2,7 +2,7 @@ use {
     super::binary,
     crate::{
         binary::{MpvBinary, get_mpv_binary},
-        ipc,
+        ipc::{self, HandledIpcResponse},
         protocol::event::{
             MpvEvent,
             MpvEventKind,
@@ -13,6 +13,7 @@ use {
         sink::Sink,
         stream::{Stream, TryRecvError},
     },
+    ringbuf::{HeapRb, LocalRb},
     std::{
         collections::BTreeMap,
         convert::identity,
@@ -55,10 +56,12 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(derivative::Derivative)]
+#[derivative(Debug)]
 pub struct MpvInstance {
     pub process: MpvProcess,
-    pub events: BTreeMap<MpvEventKind, MpvEvent>,
+    #[derivative(Debug = "ignore")]
+    buffer: HeapRb<HandledIpcResponse<serde_json::Value>>,
     pub(crate) line_buffer: String,
 }
 
@@ -214,7 +217,7 @@ impl MpvInstance {
     pub fn new(media_path: &Path) -> Result<Self> {
         MpvProcess::spawn(media_path).map(|process| Self {
             process,
-            events: Default::default(),
+            buffer: HeapRb::new(1024),
             line_buffer: String::new(),
         })
     }

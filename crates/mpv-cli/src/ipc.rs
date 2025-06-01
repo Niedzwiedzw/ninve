@@ -2,21 +2,15 @@ use {
     crate::{
         instance::MpvInstance,
         protocol::{
-            MpvCommand,
-            event::{MpvEvent, MpvEventKind},
-            message::{BaseResponse, ErrorResponse, IpcResponse},
+            event::{MpvEvent, MpvEventKind}, message::{BaseResponse, ErrorResponse, IpcResponse}, MpvCommand
         },
-    },
-    serde::{Deserialize, Serialize, de::DeserializeOwned},
-    std::{
+    }, ringbuf::traits::Producer, serde::{de::DeserializeOwned, Deserialize, Serialize}, std::{
         any::type_name,
         convert::identity,
         fmt::Debug,
         io::{BufRead, Write},
         process::ExitStatus,
-    },
-    tap::Pipe,
-    tracing::{debug, error, info, instrument},
+    }, tap::Pipe, tracing::{debug, error, info, instrument}
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -67,6 +61,7 @@ pub struct WithBaseResponse<T> {
     pub value: T,
 }
 
+#[derive(Debug)]
 pub enum HandledIpcResponse<T> {
     Success(T),
     Event(MpvEvent),
@@ -81,6 +76,8 @@ impl<T> IpcResponse<T> {
         }
     }
 }
+
+mod event_bus;
 
 impl MpvInstance {
     pub fn kill(self) -> Result<ExitStatus> {
@@ -172,8 +169,8 @@ impl MpvInstance {
                             HandledIpcResponse::Success(success_response) => return Ok(success_response),
                             HandledIpcResponse::Event(mpv_event) => {
                                 info!("[event] {mpv_event:?}");
-                                self.events
-                                    .insert(MpvEventKind::from(&mpv_event), mpv_event);
+                                self.buffer.try_push(elem)
+                                    .(MpvEventKind::from(&mpv_event), mpv_event);
                                 continue;
                             }
                         },
