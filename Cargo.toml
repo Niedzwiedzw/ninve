@@ -11,6 +11,9 @@ readme = "README.md"
 edition = "2024"
 
 [workspace.dependencies]
+# local
+mpv-cli.path = "crates/mpv-cli"
+# external
 anyhow = "1.0.98"
 clap = "4.5.38"
 futures = "0.3.31"

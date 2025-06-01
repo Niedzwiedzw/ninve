@@ -1,10 +1,13 @@
 use {
     anyhow::{Context, Result},
-    futures::FutureExt,
+    clap::Parser,
+    cli::Cli,
+    futures::{FutureExt, TryFutureExt},
+    mpv_cli::instance::MpvInstance,
+    std::{future::ready, path::Path},
+    tap::{Pipe, Tap},
     tokio::task::LocalSet,
 };
-
-pub struct Ninve {}
 
 #[allow(dead_code)]
 fn in_runtime<T, F>(in_runtime: F) -> Result<T>
@@ -68,7 +71,47 @@ mod logging {
     }
 }
 
+struct Ninve {
+    mpv: MpvInstance,
+}
+
+impl Ninve {
+    pub fn new(media_path: &Path) -> Result<Self> {
+        MpvInstance::new(media_path)
+            .context("spawning mpv instance")
+            .and_then(|mpv| mpv.await_playback().context("awaiting playback"))
+            .map(|mpv| Self { mpv })
+    }
+}
+
+mod cli {
+    use {clap::Parser, std::path::PathBuf};
+
+    #[derive(Parser)]
+    #[command(version, about, long_about = None)]
+    pub(crate) struct Cli {
+        /// path to the edited file
+        pub media_path: PathBuf,
+    }
+}
+
 fn main() -> Result<()> {
     logging::setup_tracing();
-    Ok(())
+    let Cli { media_path } = Cli::parse();
+    ratatui::init()
+        .pipe(|_terminal| {
+            in_runtime(async move || {
+                Ninve::new(&media_path)
+                    .context("instantiating ninve")
+                    .pipe(ready)
+                    .and_then(|ninve| {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2))
+                            .map(|_| ninve)
+                            .map(Ok)
+                    })
+                    .await
+            })
+            .map(|_ninve| ())
+        })
+        .tap(|_| ratatui::restore())
 }

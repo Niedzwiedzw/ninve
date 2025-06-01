@@ -175,9 +175,9 @@ impl MpvProcess {
                             binary
                                 .arg(format!("--input-ipc-server={}", ipc_socket_path.path().display()))
                                 .arg(media_path)
-                                .stdin(Stdio::inherit())
+                                .stdin(Stdio::null())
                                 .stdout(Stdio::null())
-                                .stderr(Stdio::inherit());
+                                .stderr(Stdio::null());
                         })
                         .tap(|command| {
                             debug!("running command {command:?}");

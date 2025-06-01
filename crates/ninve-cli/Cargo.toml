@@ -8,6 +8,8 @@ anyhow.workspace = true
 clap = { workspace = true, features = ["derive", "cargo", "env"] }
 futures.workspace = true
 futures-util.workspace = true
+mpv-cli.workspace = true
+ratatui = "0.29.0"
 tap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
