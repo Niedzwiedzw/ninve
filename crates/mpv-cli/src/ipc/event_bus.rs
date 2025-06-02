@@ -10,7 +10,7 @@ use {
     futures::{FutureExt, TryFutureExt},
     serde::de::DeserializeOwned,
     serde_json::Value,
-    std::{any::type_name, future::ready},
+    std::{any::type_name, fmt::Debug, future::ready},
     tap::{Pipe, Tap, TapFallible},
     tokio::{
         io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -19,11 +19,30 @@ use {
             unix::{OwnedReadHalf, OwnedWriteHalf},
         },
         sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-        task::block_in_place,
     },
     tokio_stream::wrappers::UnboundedReceiverStream,
-    tracing::{debug, instrument},
+    tracing::{debug, instrument, warn},
 };
+
+#[derive(Debug)]
+#[allow(dead_code)]
+struct LogDrop<T: Debug>(pub T, &'static str);
+
+impl<T: Debug> Drop for LogDrop<T> {
+    fn drop(&mut self) {
+        debug!(kind=%type_name::<T>(), "DROPPING VALUE: {self:?}");
+    }
+}
+
+#[extension_traits::extension(trait LogDropExt)]
+impl<T: Debug> T
+where
+    Self: Sized,
+{
+    fn log_drop(self, message: &'static str) -> LogDrop<T> {
+        LogDrop(self, message)
+    }
+}
 
 #[derive(Debug, derive_more::From, derive_more::Display)]
 pub enum MaybeDeserializedResponse {
@@ -67,7 +86,7 @@ pub struct EventBus {
 
 struct EventBusWriteHandler {
     command: UnboundedReceiver<String>,
-    write_half: OwnedWriteHalf,
+    write_half: LogDrop<OwnedWriteHalf>,
 }
 
 impl EventBusWriteHandler {
@@ -75,19 +94,21 @@ impl EventBusWriteHandler {
         self.pipe(async |Self { mut command, mut write_half }| -> Result<()> {
             while let Some(next) = command.recv().await {
                 write_half
+                    .0
                     .write_all(next.as_bytes())
                     .await
                     .map_err(Error::WritingToStdin)?;
                 write_half
+                    .0
                     .write_all("\n".as_bytes())
                     .await
                     .map_err(Error::WritingToStdin)?;
-                write_half.flush().await.map_err(Error::WritingToStdin)?;
+                write_half.0.flush().await.map_err(Error::WritingToStdin)?;
             }
             tracing::warn!("writer died");
             Ok(())
         })
-        .pipe(|_| Ok(()))
+        .await
     }
 }
 
@@ -103,7 +124,7 @@ struct EventBusReadHandler {
     responses: UnboundedSender<serde_json::Value>,
     events: UnboundedSender<MpvEvent>,
     line_buffer: String,
-    read_half: BufReader<OwnedReadHalf>,
+    read_half: LogDrop<BufReader<OwnedReadHalf>>,
 }
 impl EventBusReadHandler {
     async fn with_next_line<T, F>(&mut self, with_next_line: F) -> std::io::Result<T>
@@ -112,10 +133,12 @@ impl EventBusReadHandler {
     {
         self.line_buffer.clear();
         self.read_half
+            .0
             .read_line(&mut self.line_buffer)
             .await
             .and_then(|size| {
                 if size == 0 {
+                    warn!("EOF");
                     Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, Error::UnixStreamEof))
                 } else {
                     Ok(())
@@ -127,20 +150,18 @@ impl EventBusReadHandler {
     }
 
     #[instrument(skip(self))]
-    async fn next_message_raw<R: DeserializeOwned + std::fmt::Debug>(&mut self) -> Result<Option<IpcResponse<R>>> {
+    async fn next_message_raw<R: DeserializeOwned + Debug>(&mut self) -> Result<Option<IpcResponse<R>>> {
         self.with_next_line(async |line| {
             if line.is_empty() {
                 Ok(None)
             } else {
-                block_in_place(|| {
-                    IpcResponse::<R>::from_json(line)
-                        .map_err(|source| Error::DeserializingResponse {
-                            ty: type_name::<R>(),
-                            raw: line.to_string().into(),
-                            source,
-                        })
-                        .map(Some)
-                })
+                IpcResponse::<R>::from_json(line)
+                    .map_err(|source| Error::DeserializingResponse {
+                        ty: type_name::<R>(),
+                        raw: line.to_string().into(),
+                        source,
+                    })
+                    .map(Some)
             }
         })
         .map_err(Error::ReadingFromStdout)
@@ -193,7 +214,7 @@ impl EventBus {
                 responses: responses_tx,
                 events: events_tx,
                 line_buffer: Default::default(),
-                read_half: BufReader::new(read_half),
+                read_half: BufReader::new(read_half).log_drop("buf reader of read half"),
             }
             .run()
             .await
@@ -202,7 +223,7 @@ impl EventBus {
         let tx_join_handle = tokio::task::spawn(async move {
             EventBusWriteHandler {
                 command: commands_rx,
-                write_half,
+                write_half: write_half.log_drop("write half"),
             }
             .run()
             .await

@@ -12,7 +12,6 @@ use {
     serde_json::Value,
     std::{any::type_name, fmt::Debug, future::ready, process::ExitStatus},
     tap::Pipe,
-    tokio::task::block_in_place,
     tracing::{debug, error, instrument},
 };
 
@@ -124,12 +123,10 @@ impl MpvInstance {
             .await
             .ok_or(Error::ReceivingResponseChannelClosed)
             .and_then(|response| {
-                block_in_place(|| {
-                    serde_json::from_value::<R>(response.clone()).map_err(|source| Error::DeserializingResponse {
-                        ty: type_name::<R>(),
-                        raw: response.clone().into(),
-                        source,
-                    })
+                serde_json::from_value::<R>(response.clone()).map_err(|source| Error::DeserializingResponse {
+                    ty: type_name::<R>(),
+                    raw: response.clone().into(),
+                    source,
                 })
             })
     }
@@ -137,7 +134,7 @@ impl MpvInstance {
     #[instrument(level = "TRACE", ret, err)]
     pub async fn command_raw<C: Serialize + Debug, R: DeserializeOwned + Debug>(&mut self, command: C) -> Result<R> {
         debug!("running command {command:?}");
-        block_in_place(|| serde_json::to_string(&command))
+        serde_json::to_string(&command)
             .map_err(|source| Error::SerializingCommand { ty: type_name::<C>(), source })
             .and_then(|command| {
                 debug!(" -> [ command ] {command}");
