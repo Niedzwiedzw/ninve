@@ -1,3 +1,10 @@
+name: Build and Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
 jobs:
   build-and-release:
     runs-on: ${{ matrix.os }}
