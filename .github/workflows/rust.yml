@@ -30,30 +30,30 @@ jobs:
 
       - name: Build for Linux
         run: |
-          cargo build --release --target x86_64-unknown-linux-gnu --manifest-path crates/ninve-cli/Cargo.toml
-          mv crates/ninve-cli/target/x86_64-unknown-linux-gnu/release/ninve-cli crates/ninve-cli/target/x86_64-unknown-linux-gnu/release/ninve
+          cargo build --release --target x86_64-unknown-linux-gnu
+          mv target/x86_64-unknown-linux-gnu/release/ninve-cli target/x86_64-unknown-linux-gnu/release/ninve
         env:
           CARGO_INCREMENTAL: 0
 
       - name: Build for macOS
         run: |
-          cargo build --release --target x86_64-apple-darwin --manifest-path crates/ninve-cli/Cargo.toml
-          mv crates/ninve-cli/target/x86_64-apple-darwin/release/ninve-cli crates/ninve-cli/target/x86_64-apple-darwin/release/ninve
+          cargo build --release --target x86_64-apple-darwin
+          mv target/x86_64-apple-darwin/release/ninve-cli target/x86_64-apple-darwin/release/ninve
         env:
           CARGO_INCREMENTAL: 0
 
       - name: Build for Windows
         run: |
-          cargo build --release --target x86_64-pc-windows-gnu --manifest-path crates/ninve-cli/Cargo.toml
-          mv crates/ninve-cli/target/x86_64-pc-windows-gnu/release/ninve-cli.exe crates/ninve-cli/target/x86_64-pc-windows-gnu/release/ninve.exe
+          cargo build --release --target x86_64-pc-windows-gnu
+          mv target/x86_64-pc-windows-gnu/release/ninve-cli.exe target/x86_64-pc-windows-gnu/release/ninve.exe
         env:
           CARGO_INCREMENTAL: 0
 
       - name: Create release artifacts
         run: |
-          tar -czvf ninve-linux-x86_64.tar.gz -C crates/ninve-cli/target/x86_64-unknown-linux-gnu/release ninve
-          tar -czvf ninve-macos-x86_64.tar.gz -C crates/ninve-cli/target/x86_64-apple-darwin/release ninve
-          zip -j ninve-windows-x86_64.zip crates/ninve-cli/target/x86_64-pc-windows-gnu/release/ninve.exe
+          tar -czvf ninve-linux-x86_64.tar.gz -C target/x86_64-unknown-linux-gnu/release ninve
+          tar -czvf ninve-macos-x86_64.tar.gz -C target/x86_64-apple-darwin/release ninve
+          zip -j ninve-windows-x86_64.zip target/x86_64-pc-windows-gnu/release/ninve.exe
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
