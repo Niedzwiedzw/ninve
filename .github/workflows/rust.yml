@@ -46,9 +46,9 @@ jobs:
       - name: Create release artifact
         run: |
           if [[ "${{ matrix.target.target }}" == "x86_64-pc-windows-gnu" ]]; then
-           zip -j ${{ matrix.target.artifact }} target/${{ matrix.target.target }}/release/ninve.exe
+           zip -j ${{ matrix.target.artifact }} target/release/ninve.exe
           else
-           tar -czvf ${{ matrix.target.artifact }} -C target/${{ matrix.target.target }}/release ninve
+           tar -czvf ${{ matrix.target.artifact }} -C target/release ninve
           fi
       - name: Upload artifact
         uses: actions/upload-artifact@v4
