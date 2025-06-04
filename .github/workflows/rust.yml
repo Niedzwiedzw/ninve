@@ -1,0 +1,66 @@
+name: Build and Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu, x86_64-apple-darwin, x86_64-pc-windows-gnu
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/ninve-cli
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
+
+      - name: Build for Linux
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu --manifest-path crates/ninve-cli/Cargo.toml
+          mv crates/ninve-cli/target/x86_64-unknown-linux-gnu/release/ninve-cli crates/ninve-cli/target/x86_64-unknown-linux-gnu/release/ninve
+        env:
+          CARGO_INCREMENTAL: 0
+
+      - name: Build for macOS
+        run: |
+          cargo build --release --target x86_64-apple-darwin --manifest-path crates/ninve-cli/Cargo.toml
+          mv crates/ninve-cli/target/x86_64-apple-darwin/release/ninve-cli crates/ninve-cli/target/x86_64-apple-darwin/release/ninve
+        env:
+          CARGO_INCREMENTAL: 0
+
+      - name: Build for Windows
+        run: |
+          cargo build --release --target x86_64-pc-windows-gnu --manifest-path crates/ninve-cli/Cargo.toml
+          mv crates/ninve-cli/target/x86_64-pc-windows-gnu/release/ninve-cli.exe crates/ninve-cli/target/x86_64-pc-windows-gnu/release/ninve.exe
+        env:
+          CARGO_INCREMENTAL: 0
+
+      - name: Create release artifacts
+        run: |
+          tar -czvf ninve-linux-x86_64.tar.gz -C crates/ninve-cli/target/x86_64-unknown-linux-gnu/release ninve
+          tar -czvf ninve-macos-x86_64.tar.gz -C crates/ninve-cli/target/x86_64-apple-darwin/release ninve
+          zip -j ninve-windows-x86_64.zip crates/ninve-cli/target/x86_64-pc-windows-gnu/release/ninve.exe
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ninve-linux-x86_64.tar.gz
+            ninve-macos-x86_64.tar.gz
+            ninve-windows-x86_64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
