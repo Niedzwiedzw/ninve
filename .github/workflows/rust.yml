@@ -31,21 +31,18 @@ jobs:
       - name: Build for Linux
         run: |
           cargo build --release --target x86_64-unknown-linux-gnu
-          mv target/x86_64-unknown-linux-gnu/release/ninve-cli target/x86_64-unknown-linux-gnu/release/ninve
         env:
           CARGO_INCREMENTAL: 0
 
       - name: Build for macOS
         run: |
           cargo build --release --target x86_64-apple-darwin
-          mv target/x86_64-apple-darwin/release/ninve-cli target/x86_64-apple-darwin/release/ninve
         env:
           CARGO_INCREMENTAL: 0
 
       - name: Build for Windows
         run: |
           cargo build --release --target x86_64-pc-windows-gnu
-          mv target/x86_64-pc-windows-gnu/release/ninve-cli.exe target/x86_64-pc-windows-gnu/release/ninve.exe
         env:
           CARGO_INCREMENTAL: 0
 

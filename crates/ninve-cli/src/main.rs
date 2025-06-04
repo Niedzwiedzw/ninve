@@ -299,12 +299,17 @@ fn generate_filename(media_path: &Path, start: Time, end: Time) -> Result<PathBu
 
 fn trim_video_with_ffmpeg(input: &Path, output: &Path, range: TimeRange) -> Result<PathBuf> {
     std::process::Command::new("ffmpeg")
+        .args(["-ss", &range.start.to_seconds_string()]) // Seek before input
         .arg("-i")
         .arg(input)
-        .args(["-ss", range.start.to_seconds_string().as_str()])
-        .args(["-to", range.end.to_seconds_string().as_str()])
-        .args(["-c", "copy"])
-        .args(["-map", "0"])
+        .args(["-to", &range.end.to_seconds_string()])
+        .args(["-c:v", "copy"]) // Copy video stream
+        .args(["-c:a", "copy"]) // Copy audio stream
+        .args(["-map", "0:v:0"]) // Select first video stream
+        .args(["-map", "0:a:0"]) // Select first audio stream
+        .arg("-copyts") // Preserve timestamps
+        .args(["-avoid_negative_ts", "make_zero"]) // Fix timestamp issues
+        .arg("-y") // Overwrite output file
         .arg(output)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
