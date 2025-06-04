@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "mpv-cli"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "crabtime",
@@ -832,7 +832,7 @@ dependencies = [
 
 [[package]]
 name = "ninve"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "clap",
