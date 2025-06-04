@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/ninve-cli", "crates/mpv-cli"]
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 license = "MIT"
 repository = "https://github.com/Niedzwiedzw/ninve"
 categories = ["gui", "video", "editor"]
