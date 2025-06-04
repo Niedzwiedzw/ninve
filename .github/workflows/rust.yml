@@ -1,85 +1,62 @@
-name: Build and Publish Release
+name: release
 
 on:
   push:
     tags:
-      - 'v*'
+    - v[0–9].[0–9]+.[0–9]+
+    - v[0–9].[0–9]+.[0–9]+-rc[0–9]+]
 
 jobs:
-  build-and-release:
-    runs-on: ${{ matrix.os }}
+  build:
+    name: build
+    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        target:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, artifact: ninve-linux-x86_64.tar.gz }
-          - { os: ubuntu-latest, target: x86_64-pc-windows-gnu, artifact: ninve-windows-x86_64.zip }
-          - { os: macos-latest, target: x86_64-apple-darwin, artifact: ninve-macos-x86_64.tar.gz }
+        include:
+          - rust_target: x86_64-unknown-linux-gnu
+            artifact_name: ninve-bin-linux-amd64
+          - rust_target: x86_64-pc-windows-gnu
+            artifact_name: ninve-bin-windows-amd64.exe
+
     steps:
-      - name: Checkout code
+      - name: checkout code
         uses: actions/checkout@v4
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: ${{ matrix.target.target }}
+          target: ${{ matrix.rust_target }}
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/ninve-cli
+      - name: Install mingw for Windows cross-compilation
+        if: matrix.rust_target == 'x86_64-pc-windows-gnu'
+        run: sudo apt-get install -y gcc-mingw-w64-x86–64
 
-      - name: Install dependencies
-        if: matrix.os == 'ubuntu-latest'
+      - name: Build the ninve
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mingw-w64
-
-      - name: Build for target
-        run: |
-          cargo build --release --target ${{ matrix.target.target }}
-        env:
-          CARGO_INCREMENTAL: 0
-
-      - name: Create release artifact
-        run: |
-          if [[ "${{ matrix.target.target }}" == "x86_64-pc-windows-gnu" ]]; then
-            zip -j ${{ matrix.target.artifact }} target/${{ matrix.target.target }}/release/ninve.exe
+          cargo build - features web_dashboard - release - target ${{ matrix.rust_target }}
+          if [[ "${{ matrix.artifact_name }}" == *.exe ]]; then
+            mv target/${{ matrix.rust_target }}/release/ninve.exe ${{ matrix.artifact_name }}
           else
-            tar -czvf ${{ matrix.target.artifact }} -C target/${{ matrix.target.target }}/release ninve
+            mv target/${{ matrix.rust_target }}/release/ninve ${{ matrix.artifact_name }}
           fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.target.artifact }}
-          path: ${{ matrix.target.artifact }}
-
-  publish-release:
-    runs-on: ubuntu-latest
-    needs: build-and-release
-    if: always()
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Prepare artifacts for release
+      - name: determine tag type
+        id: tag_type
         run: |
-          mv artifacts/ninve-linux-x86_64.tar.gz/ninve-linux-x86_64.tar.gz . || true
-          mv artifacts/ninve-macos-x86_64.tar.gz/ninve-macos-x86_64.tar.gz . || true
-          mv artifacts/ninve-windows-x86_64.zip/ninve-windows-x86_64.zip . || true
+          if [[ ${{ github.ref }} =~ ^refs/tags/v[0–9]+\.[0–9]+\.[0–9]+-rc[0–9]+$ ]]; then
+            echo "tag_type=PRE_RELEASE_TAG" >> $GITHUB_OUTPUT
+          elif [[ ${{ github.ref }} =~ ^refs/tags/v[0–9]+\.[0–9]+\.[0–9]+$ ]]; then
+            echo "tag_type=RELEASE_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "tag_type=INVALID_TAG" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+      - name: upload binaries to release
+        if: steps.tag_type.outputs.tag_type != 'INVALID_TAG'
+        uses: svenstaro/upload-release-action@v2
         with:
-          files: |
-            ninve-linux-x86_64.tar.gz
-            ninve-macos-x86_64.tar.gz
-            ninve-windows-x86_64.zip
-          fail-on-unmatched-files: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ matrix.artifact_name }}
+          overwrite: true
+          prerelease: ${{ steps.tag_type.outputs.tag_type == 'PRE_RELEASE_TAG' }}
+          tag: ${{ github.ref }}
