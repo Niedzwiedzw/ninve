@@ -16,6 +16,14 @@ pub struct BaseResponse {
     pub request_id: Option<i64>,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct WithBaseResponse<T> {
+    #[allow(dead_code)]
+    #[serde(flatten)]
+    base: BaseResponse,
+    pub data: T,
+}
+
 #[derive(Debug, Deserialize, Clone, thiserror::Error)]
 #[error("Error response: {error}")]
 pub struct ErrorResponse {
@@ -47,46 +55,6 @@ impl<T: DeserializeOwned> IpcResponse<T> {
     }
 }
 
-pub mod api {
-    use {
-        super::{
-            BaseResponse,
-            low_level::{SetProperty, property::PropertyValue},
-        },
-        crate::protocol::MpvCommand,
-        serde::Serialize,
-        std::fmt::Debug,
-    };
-    pub mod common_responses {
-        pub type Empty = ();
-    }
-
-    #[derive(derive_more::Constructor, Debug)]
-    pub struct SetPropertyCommand<T>
-    where
-        T: PropertyValue,
-    {
-        pub command: SetProperty<T>,
-    }
-
-    impl<T> Serialize for SetPropertyCommand<T>
-    where
-        T: PropertyValue,
-    {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            serde_json::json!({"command": self.command }).serialize(serializer)
-        }
-    }
-
-    impl<T> MpvCommand for SetPropertyCommand<T>
-    where
-        T: PropertyValue + Debug,
-    {
-        type Response = BaseResponse;
-    }
-}
+pub mod api;
 
 pub mod low_level;

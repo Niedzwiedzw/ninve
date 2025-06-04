@@ -1,9 +1,24 @@
-use serde::Deserialize;
+use {
+    super::message::low_level::property::{self, PropertyValueName},
+    serde::{Deserialize, Serialize},
+};
 
 pub mod grouped_events;
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, enum_kinds::EnumKind)]
-#[enum_kind(MpvEventKind, derive(strum::Display, PartialOrd, Ord, Hash))]
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("found value of type `{ty}`, but could not parse for {property_name:?}")]
+    BadType {
+        ty: &'static str,
+        property_name: property::PropertyValueKind,
+        #[source]
+        source: serde_json::Error,
+    },
+}
+type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, enum_kinds::EnumKind)]
+#[enum_kind(MpvEventKind, derive(Serialize, strum::Display, PartialOrd, Ord, Hash))]
 #[serde(untagged)]
 pub enum MpvEvent {
     File(grouped_events::FileEvent),
@@ -15,7 +30,7 @@ pub enum MpvEvent {
     ClientInteraction(grouped_events::ClientInteractionEvent),
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct BaseEvent {
     #[serde(default)]
     pub id: Option<u64>, // reply_userdata, optional as it may be 0 (not added)
@@ -23,14 +38,14 @@ pub struct BaseEvent {
     pub error: Option<String>, // Optional, missing if no error
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct StartFileEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
     pub playlist_entry_id: u64,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum EndFileReason {
     Eof,
@@ -41,7 +56,7 @@ pub enum EndFileReason {
     Unknown,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct EndFileEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
@@ -55,7 +70,7 @@ pub struct EndFileEvent {
     pub playlist_insert_num_entries: Option<u64>, // Only present if playlist_insert_id is present
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct LogMessageEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
@@ -64,47 +79,62 @@ pub struct LogMessageEvent {
     pub text: String,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct HookEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
     pub hook_id: u64,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct GetPropertyReplyEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
     pub result: Option<serde_json::Value>, // mpv_node type, represented as JSON value
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct SetPropertyReplyEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
     pub result: Option<serde_json::Value>, // mpv_node type, represented as JSON value
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct CommandReplyEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
     pub result: Option<serde_json::Value>, // mpv_node type, represented as JSON value
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct ClientMessageEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct PropertyChangeEvent {
     #[serde(flatten)]
     pub base: BaseEvent,
-    pub name: String,
+    pub name: property::PropertyValueKind,
     pub data: Option<serde_json::Value>, // mpv_node type, represented as JSON value
+}
+
+impl PropertyChangeEvent {
+    pub fn of_kind<K: PropertyValueName>(&self) -> Option<Result<K::Value>> {
+        (K::as_str() == self.name.name())
+            .then_some(())
+            .and_then(|_| self.data.clone())
+            .map(|data| {
+                serde_json::from_value::<K::Value>(data).map_err(|source| self::Error::BadType {
+                    ty: std::any::type_name::<K::Value>(),
+                    property_name: self.name,
+                    source,
+                })
+            })
+    }
 }
 
 #[cfg(test)]

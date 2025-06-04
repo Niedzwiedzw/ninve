@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "event")]
 pub enum FileEvent {
@@ -9,7 +9,7 @@ pub enum FileEvent {
     FileLoaded,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "event")]
 pub enum PlaybackControlEvent {
@@ -17,7 +17,7 @@ pub enum PlaybackControlEvent {
     PlaybackRestart,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "event")]
 pub enum SystemEvent {
@@ -25,7 +25,7 @@ pub enum SystemEvent {
 }
 
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "event")]
 pub enum ReplyEvent {
@@ -34,7 +34,7 @@ pub enum ReplyEvent {
     CommandReply(CommandReplyEvent),
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "event")]
 pub enum ConfigEvent {
@@ -42,7 +42,7 @@ pub enum ConfigEvent {
     AudioReconfig,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "event")]
 pub enum MessageEvent {
@@ -50,7 +50,7 @@ pub enum MessageEvent {
     Hook(HookEvent),
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "event")]
 pub enum ClientInteractionEvent {

@@ -10,7 +10,8 @@ use {
     futures::{FutureExt, TryFutureExt},
     serde::de::DeserializeOwned,
     serde_json::Value,
-    std::{any::type_name, fmt::Debug, future::ready},
+    split::{BusCommandsHalf, BusEventsHalf},
+    std::{any::type_name, fmt::Debug, future::ready, sync::Arc},
     tap::{Pipe, Tap, TapFallible},
     tokio::{
         io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -21,7 +22,7 @@ use {
         sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     },
     tokio_stream::wrappers::UnboundedReceiverStream,
-    tracing::{debug, instrument, warn},
+    tracing::{debug, instrument},
 };
 
 #[derive(Debug)]
@@ -69,19 +70,16 @@ pub enum Error {
     SendingToResponses,
     #[error("Sending to events")]
     SendingToEvents,
-    #[error("Underlying unix stream returned Ok(0) (EOF)")]
-    UnixStreamEof,
+    // #[error("Underlying unix stream returned Ok(0) (EOF)")]
+    // UnixStreamEof,
 }
 
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct EventBus {
-    pub responses: UnboundedReceiver<serde_json::Value>,
-    pub events: UnboundedReceiverStream<MpvEvent>,
-    pub commands: UnboundedSender<String>,
-    #[allow(dead_code)]
-    task_guard: EventBusTaskGuard,
+    pub commands: BusCommandsHalf,
+    pub events: BusEventsHalf,
 }
 
 struct EventBusWriteHandler {
@@ -136,14 +134,6 @@ impl EventBusReadHandler {
             .0
             .read_line(&mut self.line_buffer)
             .await
-            .and_then(|size| {
-                if size == 0 {
-                    warn!("EOF");
-                    Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, Error::UnixStreamEof))
-                } else {
-                    Ok(())
-                }
-            })
             .pipe(ready)
             .and_then(|_| with_next_line(&self.line_buffer).map(Ok))
             .await
@@ -201,6 +191,25 @@ impl EventBusReadHandler {
     }
 }
 
+pub mod split {
+    use {super::EventBusTaskGuard, crate::protocol::event::MpvEvent, std::sync::Arc, tokio::sync::mpsc, tokio_stream::wrappers::UnboundedReceiverStream};
+
+    #[derive(Debug)]
+    pub struct BusEventsHalf {
+        #[allow(dead_code)]
+        pub(super) task_guard: Arc<EventBusTaskGuard>,
+        pub events: UnboundedReceiverStream<MpvEvent>,
+    }
+
+    #[derive(Debug)]
+    pub struct BusCommandsHalf {
+        #[allow(dead_code)]
+        pub(super) task_guard: Arc<EventBusTaskGuard>,
+        pub responses: mpsc::UnboundedReceiver<serde_json::Value>,
+        pub commands: mpsc::UnboundedSender<String>,
+    }
+}
+
 impl EventBus {
     pub fn spawn(stream: UnixStream) -> Self {
         debug!("spawning event bus");
@@ -229,13 +238,19 @@ impl EventBus {
             .await
             .expect("write event bus crashed")
         });
+        let task_guard = Arc::new(EventBusTaskGuard {
+            rx_join_handle: rx_join_handle.abort_on_drop(),
+            tx_join_handle: tx_join_handle.abort_on_drop(),
+        });
         Self {
-            responses: responses_rx,
-            events: events_rx.pipe(UnboundedReceiverStream::new),
-            commands: commands_tx,
-            task_guard: EventBusTaskGuard {
-                rx_join_handle: rx_join_handle.abort_on_drop(),
-                tx_join_handle: tx_join_handle.abort_on_drop(),
+            commands: BusCommandsHalf {
+                task_guard: task_guard.clone(),
+                responses: responses_rx,
+                commands: commands_tx,
+            },
+            events: BusEventsHalf {
+                task_guard: task_guard.clone(),
+                events: events_rx.pipe(UnboundedReceiverStream::new),
             },
         }
     }

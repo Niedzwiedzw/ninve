@@ -2,7 +2,10 @@ use {
     super::binary,
     crate::{
         binary::{MpvBinary, get_mpv_binary},
-        ipc::{self, event_bus::EventBus},
+        ipc::{
+            self,
+            event_bus::{EventBus, split::BusEventsHalf},
+        },
         protocol::event::{
             MpvEvent,
             grouped_events::{FileEvent, PlaybackControlEvent},
@@ -59,7 +62,7 @@ pub struct MpvInstance {
 }
 
 #[derive(Debug)]
-struct WatchedCommand {
+pub struct WatchedCommand {
     finish: Option<oneshot::Receiver<std::io::Result<ExitStatus>>>,
     kill: Option<oneshot::Sender<()>>,
     #[allow(dead_code)]
@@ -74,7 +77,7 @@ impl Drop for WatchedCommand {
 }
 
 impl WatchedCommand {
-    pub async fn wait(mut self) -> std::io::Result<ExitStatus> {
+    pub async fn wait(&mut self) -> std::io::Result<ExitStatus> {
         self.finish
             .take()
             .expect("already awaited")
@@ -175,16 +178,19 @@ pub struct MpvProcess {
     #[allow(dead_code)]
     binary: MpvBinary<'static>,
     #[allow(dead_code)]
-    child: WatchedCommand,
+    pub child: WatchedCommand,
     #[allow(dead_code)]
     socket_file: tempfile::NamedTempFile,
     pub event_bus: EventBus,
 }
 
-impl MpvProcess {
+impl BusEventsHalf {
     pub fn events(&mut self) -> impl Stream<Item = MpvEvent> + '_ {
-        &mut self.event_bus.events
+        &mut self.events
     }
+}
+
+impl MpvProcess {
     pub async fn kill(mut self) -> Result<ExitStatus> {
         self.child.kill().await.map_err(Error::KillingProcess)
     }
@@ -204,8 +210,8 @@ impl MpvProcess {
                                     .arg(format!("--input-ipc-server={}", ipc_socket_path.path().display()))
                                     .arg(media_path)
                                     .stdin(Stdio::null())
-                                    .stdout(Stdio::inherit())
-                                    .stderr(Stdio::inherit());
+                                    .stdout(Stdio::null())
+                                    .stderr(Stdio::null());
                             })
                             .tap(|command| {
                                 debug!("running command {command:?}");
@@ -246,20 +252,13 @@ impl MpvProcess {
     }
 }
 
-impl MpvInstance {
-    #[instrument]
-    pub async fn new(media_path: &Path) -> Result<Self> {
-        MpvProcess::spawn(media_path)
-            .map_ok(|process| Self { process })
-            .await
-    }
+impl BusEventsHalf {
     #[instrument(skip(self))]
-    pub async fn await_playback(mut self) -> Result<Self> {
+    pub async fn await_playback(&mut self) -> Result<()> {
         let mut await_event = async |event| {
             let _s = debug_span!("awaiting event", ?event).entered();
             trace!("waiting");
-            self.process
-                .events()
+            self.events()
                 .filter_map(|ev| (ev == event).then_some(()).pipe(ready))
                 .next()
                 .instrument(Span::current())
@@ -269,10 +268,20 @@ impl MpvInstance {
         await_event(MpvEvent::File(FileEvent::FileLoaded)).await?;
         await_event(MpvEvent::PlaybackControl(PlaybackControlEvent::PlaybackRestart)).await?;
 
-        Ok(self)
+        Ok(())
     }
+}
+
+impl MpvInstance {
+    #[instrument]
+    pub async fn new(media_path: &Path) -> Result<Self> {
+        MpvProcess::spawn(media_path)
+            .map_ok(|process| Self { process })
+            .await
+    }
+
     #[instrument(skip(self))]
-    pub async fn finish(self) -> Result<()> {
+    pub async fn finish(mut self) -> Result<()> {
         self.process
             .child
             .wait()

@@ -8,7 +8,8 @@ use {
     },
     anyhow::{Context, Result},
     futures::{FutureExt, TryFutureExt},
-    std::path::Path,
+    std::{future::ready, path::Path},
+    tap::Pipe,
     test_log::test,
     tokio::time::{Duration, sleep},
     tracing::{info, info_span},
@@ -29,25 +30,38 @@ async fn test_play_whole_video() -> Result<()> {
     let _s = info_span!("test_play_whole_video").entered();
     MpvInstance::new(in_test_dir!("test-video-1.mp4"))
         .map(|r| r.context("starting mpv"))
-        .and_then(|mpv| {
-            mpv.await_playback()
+        .and_then(async |mut mpv| {
+            mpv.process
+                .event_bus
+                .events
+                .await_playback()
+                .await
+                .pipe(ready)
                 .map(|r| r.context("awaiting for playback"))
+                .map_ok(|_| mpv)
+                .await
         })
         .inspect_ok(|_| info!("playback started"))
         .and_then(async |mut mpv| {
             let response = mpv
+                .process
+                .event_bus
+                .commands
                 .command(SetPropertyCommand::new(SetProperty(Pause(true))))
                 .await
                 .context("pausing")?;
             info!("response: {response:?}");
             sleep_1s().await;
             let response = mpv
+                .process
+                .event_bus
+                .commands
                 .command(SetPropertyCommand::new(SetProperty(Pause(false))))
                 .await
                 .context("unpausing")?;
             info!("response: {response:?}");
             sleep_1s().await;
-            mpv.kill()
+            mpv.finish()
                 .await
                 .context("finishing the process")
                 .map(|_| ())?;

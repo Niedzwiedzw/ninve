@@ -7,6 +7,7 @@ use {
             message::{BaseResponse, ErrorResponse, IpcResponse},
         },
     },
+    event_bus::split::BusCommandsHalf,
     futures::TryFutureExt,
     serde::{Deserialize, Serialize, de::DeserializeOwned},
     serde_json::Value,
@@ -29,7 +30,7 @@ pub enum Error {
         #[source]
         source: serde_json::Error,
     },
-    #[error("Could not deserialize a command response:\n`{raw}`")]
+    #[error("Could not deserialize a command response of type `{ty}`:\n`{raw}`")]
     DeserializingResponse {
         ty: &'static str,
         raw: MaybeDeserializedResponse,
@@ -91,14 +92,7 @@ impl<T> IpcResponse<T> {
 
 pub mod event_bus;
 
-impl MpvInstance {
-    pub async fn kill(self) -> Result<ExitStatus> {
-        self.process
-            .kill()
-            .await
-            .map_err(Box::new)
-            .map_err(Error::KillingMpv)
-    }
+impl BusCommandsHalf {
     #[instrument(skip(self), level = "DEBUG", ret, err)]
     pub async fn command<C>(&mut self, command: C) -> Result<C::Response>
     where
@@ -116,9 +110,7 @@ impl MpvInstance {
     }
 
     async fn next_response_raw<R: DeserializeOwned + Debug>(&mut self) -> Result<R> {
-        self.process
-            .event_bus
-            .responses
+        self.responses
             .recv()
             .await
             .ok_or(Error::ReceivingResponseChannelClosed)
@@ -138,14 +130,22 @@ impl MpvInstance {
             .map_err(|source| Error::SerializingCommand { ty: type_name::<C>(), source })
             .and_then(|command| {
                 debug!(" -> [ command ] {command}");
-                self.process
-                    .event_bus
-                    .commands
+                self.commands
                     .send(command)
                     .map_err(|_| Error::SendingCommand)
             })
             .pipe(ready)
-            .and_then(|_| self.next_response_raw())
+            .and_then(|_| self.next_response_raw::<R>())
             .await
+    }
+}
+
+impl MpvInstance {
+    pub async fn kill(self) -> Result<ExitStatus> {
+        self.process
+            .kill()
+            .await
+            .map_err(Box::new)
+            .map_err(Error::KillingMpv)
     }
 }

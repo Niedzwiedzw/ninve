@@ -8,6 +8,7 @@ readme.workspace = true
 edition.workspace = true
 
 [dependencies]
+crabtime = { git = "https://github.com/wdanilo/crabtime", rev = "2ed856f5f8b85a1e81598d64a36305a1d3f17d01" }
 derivative = "2.2.0"
 derive_more = { workspace = true, features = ["full"] }
 enum-kinds.workspace = true
@@ -15,6 +16,7 @@ extension-traits.workspace = true
 futures.workspace = true
 futures-util.workspace = true
 itertools.workspace = true
+paste = "1.0.15"
 rand.workspace = true
 ringbuf = "0.4.8"
 serde = { workspace = true, features = ["derive"] }
