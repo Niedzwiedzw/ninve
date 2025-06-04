@@ -208,6 +208,7 @@ impl MpvProcess {
                             .tap_mut(|binary| {
                                 binary
                                     .arg(format!("--input-ipc-server={}", ipc_socket_path.path().display()))
+                                    .arg("--loop-file=inf")
                                     .arg(media_path)
                                     .stdin(Stdio::null())
                                     .stdout(Stdio::null())
