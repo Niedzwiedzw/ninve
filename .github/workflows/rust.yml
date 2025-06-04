@@ -8,6 +8,14 @@ on:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        target:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, artifact: ninve-linux-x86_64.tar.gz, rename_cmd: "mv target/x86_64-unknown-linux-gnu/release/ninve-cli target/x86_64-unknown-linux-gnu/release/ninve" }
+          - { os: ubuntu-latest, target: x86_64-pc-windows-gnu, artifact: ninve-windows-x86_64.zip, rename_cmd: "mv target/x86_64-pc-windows-gnu/release/ninve-cli.exe target/x86_64-pc-windows-gnu/release/ninve.exe" }
+          - { os: macos-latest, target: x86_64-apple-darwin, artifact: ninve-macos-x86_64.tar.gz, rename_cmd: "mv target/x86_64-apple-darwin/release/ninve-cli target/x86_64-apple-darwin/release/ninve" }
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -16,7 +24,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: x86_64-unknown-linux-gnu, x86_64-apple-darwin, x86_64-pc-windows-gnu
+          targets: ${{ matrix.target.target }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -24,40 +32,53 @@ jobs:
           workspaces: crates/ninve-cli
 
       - name: Install dependencies
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y mingw-w64
 
-      - name: Build for Linux
+      - name: Build for target
         run: |
-          cargo build --release --target x86_64-unknown-linux-gnu
+          cargo build --release
         env:
           CARGO_INCREMENTAL: 0
 
-      - name: Build for macOS
+      - name: Create release artifact
         run: |
-          cargo build --release --target x86_64-apple-darwin
-        env:
-          CARGO_INCREMENTAL: 0
-
-      - name: Build for Windows
-        run: |
-          cargo build --release --target x86_64-pc-windows-gnu
-        env:
-          CARGO_INCREMENTAL: 0
-
-      - name: Create release artifacts
-        run: |
-          tar -czvf ninve-linux-x86_64.tar.gz -C target/x86_64-unknown-linux-gnu/release ninve
-          tar -czvf ninve-macos-x86_64.tar.gz -C target/x86_64-apple-darwin/release ninve
-          zip -j ninve-windows-x86_64.zip target/x86_64-pc-windows-gnu/release/ninve.exe
-
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+          if [[ "${{ matrix.target.target }}" == "x86_64-pc-windows-gnu" ]]; then
+           zip -j ${{ matrix.target.artifact }} target/${{ matrix.target.target }}/release/ninve.exe
+          else
+           tar -czvf ${{ matrix.target.artifact }} -C target/${{ matrix.target.target }}/release ninve
+          fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            ninve-linux-x86_64.tar.gz
-            ninve-macos-x86_64.tar.gz
-            ninve-windows-x86_64.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+         name: ${{ matrix.target.artifact }}
+         path: ${{ matrix.target.artifact }}
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs: build-and-release
+    if: always()
+    steps:
+     - name: Download artifacts
+       uses: actions/download-artifact@v4
+       with:
+         path: artifacts
+
+     - name: Prepare artifacts for release
+       run: |
+         mv artifacts/ninve-linux-x86_64.tar.gz/ninve-linux-x86_64.tar.gz . || true
+         mv artifacts/ninve-macos-x86_64.tar.gz/ninve-macos-x86_64.tar.gz . || true
+         mv artifacts/ninve-windows-x86_64.zip/ninve-windows-x86_64.zip . || true
+
+     - name: Publish release
+       uses: softprops/action-gh-release@v2
+       with:
+         files: |
+           ninve-linux-x86_64.tar.gz
+           ninve-macos-x86_64.tar.gz
+           ninve-windows-x86_64.zip
+         fail-on-unmatched-files: false
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
