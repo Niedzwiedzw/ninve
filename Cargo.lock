@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "mpv-cli"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "anyhow",
  "derivative",
@@ -801,7 +801,7 @@ dependencies = [
 
 [[package]]
 name = "ninve"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "anyhow",
  "clap",
