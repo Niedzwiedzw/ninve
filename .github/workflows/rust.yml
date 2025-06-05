@@ -205,10 +205,9 @@ jobs:
     - name: Creating directory for archive
       shell: bash
       run: |
-        mkdir -p "$ARCHIVE"/{complete,doc}
+        mkdir -p "$ARCHIVE"/{doc}
         cp "$BIN" "$ARCHIVE"/
-        cp {README.md,COPYING,UNLICENSE,LICENSE-MIT} "$ARCHIVE"/
-        cp {CHANGELOG.md,FAQ.md,GUIDE.md} "$ARCHIVE"/doc/
+        cp {README.md,LICENSE} "$ARCHIVE"/
 
     - name: Build archive (Windows)
       shell: bash

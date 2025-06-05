@@ -30,7 +30,7 @@ ARCHIVE="deployment/m2/$NAME"
 mkdir -p "$ARCHIVE"/{complete,doc}
 cp "$BIN" "$ARCHIVE"/
 strip "$ARCHIVE/ninve"
-cp {README.md,COPYING,UNLICENSE,LICENSE-MIT} "$ARCHIVE"/
+cp {README.md,LICENSE} "$ARCHIVE"/
 cp {CHANGELOG.md,FAQ.md,GUIDE.md} "$ARCHIVE"/doc/
 "$BIN" --generate complete-bash > "$ARCHIVE/complete/ninve.bash"
 "$BIN" --generate complete-fish > "$ARCHIVE/complete/ninve.fish"
