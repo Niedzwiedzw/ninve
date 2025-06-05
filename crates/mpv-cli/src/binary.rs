@@ -27,7 +27,7 @@ static MPV_BINARY: OnceLock<Result<MpvBinary<'static>>> = OnceLock::new();
 fn init_mpv_binary() -> Result<MpvBinary<'static>> {
     which::which("mpv")
         .map_err(Error)
-        .map(|path| -> &'static Path { path.leak::<'static>() })
+        .map(|path| -> &'static Path { Box::<Path>::from(path).pipe(Box::leak) })
         .map(MpvBinary)
 }
 

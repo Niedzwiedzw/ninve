@@ -1,11 +1,8 @@
 use {
     super::{
-        BaseResponse,
-        WithBaseResponse,
+        BaseResponse, WithBaseResponse,
         low_level::{
-            GetProperty,
-            ObserveProperty,
-            SetProperty,
+            GetProperty, ObserveProperty, SetProperty,
             property::{PropertyValueName, SetPropertyValue},
         },
     },
@@ -101,17 +98,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use {
-        super::*,
-        crate::protocol::{
-            self,
-            message::{
-                IpcResponse,
-                low_level::property::{self, PropertyValueName},
-            },
-        },
-        tap::Tap,
-    };
+    use {crate::protocol::message::IpcResponse, tap::Tap};
 
     #[test_log::test]
     fn test_example_response_1() {
