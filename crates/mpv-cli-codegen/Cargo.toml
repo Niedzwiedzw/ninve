@@ -1,0 +1,11 @@
+[package]
+name = "mpv-cli-codegen"
+version = "0.1.16"
+license = "MIT"
+repository = "https://github.com/Niedzwiedzw/ninve"
+categories = ["gui", "video", "editor"]
+readme = "README.md"
+edition = "2024"
+
+[dependencies]
+tap = "1.0.1"

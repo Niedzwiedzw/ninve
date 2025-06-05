@@ -8,8 +8,7 @@ use {
 
 #[macro_use]
 mod codegen;
-
-gen_property_values!();
+pub use codegen::*;
 
 pub trait SetPropertyValue {
     type Kind: PropertyValueName<Value = Self>;
