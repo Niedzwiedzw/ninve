@@ -4,7 +4,7 @@ members = ["crates/ninve-cli", "crates/mpv-cli"]
 exclude = ["crates/mpv-cli-codegen"]
 
 [workspace.package]
-version = "0.1.18"
+version = "0.1.19"
 license = "MIT"
 repository = "https://github.com/Niedzwiedzw/ninve"
 categories = ["gui", "video", "editor"]

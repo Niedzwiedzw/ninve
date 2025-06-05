@@ -397,7 +397,7 @@ fn main() -> Result<()> {
                         "QUIT:           <c> / <q>",
                         "TRIM LEFT:      <[>",
                         "TRIM RIGHT:     <]>",
-                        "LOOP:           <]>",
+                        "LOOP:           <l>",
                         "PAUSE/PLAY:     <SPC>",
                         "RENDER:         <R>",
                         "",
