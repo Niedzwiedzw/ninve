@@ -1,6 +1,6 @@
 # Ninve
 
-Ninve (Ninve Is Not a Video Editor) is a simple, minimal viable product (MVP) command-line tool written in Rust that allows you to quickly trim videos in a lossless manner using a text-based user interface (TUI). It leverages `mpv` and `ffmpeg` to provide an efficient and user-friendly video trimming experience.
+Ninve (Ninve Is Not a Video Editor) is a simple (MPV wrapper) command-line tool written in Rust that allows you to quickly trim videos in a lossless manner using a text-based user interface (TUI). It uses `mpv` and `ffmpeg` to provide an efficient and user-friendly video trimming experience.
 
 ## Features
 - Lossless video trimming
