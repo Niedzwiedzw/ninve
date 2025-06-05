@@ -46,7 +46,10 @@ ninve ./path-to-my-file.mp4 ./output-file.mp4
 The TUI will guide you through selecting the start and end points for trimming the video.
 
 ## How it works
-https://github.com/user-attachments/assets/fd0db7b4-3034-47cd-a384-67b72a1f19b1
+
+https://github.com/user-attachments/assets/ef153206-01e8-45e8-ace9-84f88f6edc7c
+
+
 
 
 ## Contributing
