@@ -399,7 +399,7 @@ fn main() -> Result<()> {
                         "TRIM RIGHT:     <]>",
                         "LOOP:           <l>",
                         "PAUSE/PLAY:     <SPC>",
-                        "RENDER:         <R>",
+                        "RENDER:         <r>",
                         "",
                         "use MPV controls for the rest",
                         "",
