@@ -30,6 +30,9 @@ Ensure these binaries are available in your system's PATH.
    ```
 4. The binary will be available in `target/release/ninve`.
 
+### Arch Linux installation
+`yay -S ninve`
+
 ## Usage
 Run Ninve by providing the path to the input video file:
 
