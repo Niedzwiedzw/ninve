@@ -212,6 +212,7 @@ impl std::fmt::Display for TimeRange {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Ratio(u32, u32);
+
 impl Ratio {
     fn new(val: u32, compared_to: u32) -> Result<Self> {
         if val > compared_to {
