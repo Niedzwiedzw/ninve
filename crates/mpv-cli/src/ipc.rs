@@ -13,7 +13,7 @@ use {
     serde_json::Value,
     std::{any::type_name, fmt::Debug, future::ready, process::ExitStatus},
     tap::Pipe,
-    tracing::{debug, error, instrument},
+    tracing::{debug, instrument},
 };
 
 #[derive(Debug, derive_more::From, derive_more::Display)]
